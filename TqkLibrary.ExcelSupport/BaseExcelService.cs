@@ -15,6 +15,11 @@ namespace TqkLibrary.ExcelSupport
 {
     public abstract partial class BaseExcelService
     {
+        static BaseExcelService()
+        {
+            ExcelPackage.LicenseContext = LicenseContext.Commercial;
+        }
+
         protected readonly AsyncLock _asyncLock = new AsyncLock();
         protected readonly string _filePath;
         public BaseExcelService(string filePath)
