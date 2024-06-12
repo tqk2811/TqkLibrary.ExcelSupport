@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 
 namespace TqkLibrary.ExcelSupport
 {
-    internal class ExcelServiceLoadQueue : BaseExcelService
+    public class ExcelServiceLoadQueue : BaseExcelService
     {
         protected readonly Dictionary<Type, Queue<object>> _dict_Queues = new();
         public ExcelServiceLoadQueue(string filePath) : base(filePath)
