@@ -2,6 +2,7 @@
 using OfficeOpenXml;
 using System;
 using System.Collections.Generic;
+using System.Data;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -22,6 +23,7 @@ namespace TqkLibrary.ExcelSupport
 
         protected readonly AsyncLock _asyncLock = new AsyncLock();
         protected readonly string _filePath;
+        public bool RunInLongRunningTask { get; set; } = true;
         public BaseExcelService(string filePath)
         {
             if (!File.Exists(filePath)) throw new FileNotFoundException(filePath);
@@ -33,30 +35,56 @@ namespace TqkLibrary.ExcelSupport
             return Task.CompletedTask;
         }
 
-        public virtual async Task<IReadOnlyList<T>> GetDatasAsync<T>(
-            bool isReadAll = false,
-            bool stopAtEmptyLine = false,
-            CancellationToken cancellationToken = default) where T : BaseData, new()
+        protected virtual Task _RunInTask(Action action)
         {
-            using var l = await _asyncLock.LockAsync(cancellationToken);
-            return _GetDatas<T>(isReadAll, stopAtEmptyLine);
+            if (action is null) throw new ArgumentNullException(nameof(action));
+            if (RunInLongRunningTask)
+            {
+                return Task.Factory.StartNew(action, TaskCreationOptions.LongRunning);
+            }
+            else
+            {
+                action.Invoke();
+                return Task.CompletedTask;
+            }
+        }
+        protected virtual Task<T> _RunInTask<T>(Func<T> func)
+        {
+            if (func is null) throw new ArgumentNullException(nameof(func));
+            if (RunInLongRunningTask)
+            {
+                return Task.Factory.StartNew(func, TaskCreationOptions.LongRunning);
+            }
+            else
+            {
+                return Task.FromResult<T>(func.Invoke());
+            }
         }
 
-        public virtual async Task SaveDataAsync<T>(T data, CancellationToken cancellationToken = default) where T : BaseData, new()
+
+        public virtual Task SaveDataAsync<T>(T data, CancellationToken cancellationToken = default) where T : BaseData, new()
+            => SaveDatasAsync<T>(Enumerable.Repeat(data, 1), cancellationToken);
+        public virtual async Task SaveDatasAsync<T>(IEnumerable<T> datas, CancellationToken cancellationToken = default) where T : BaseData, new()
         {
             using var l = await _asyncLock.LockAsync(cancellationToken);
             SheetIndexAttribute? sheetIndexAttribute = typeof(T).GetCustomAttribute<SheetIndexAttribute>();
             if (sheetIndexAttribute is null)
                 throw new InvalidOperationException($"'{typeof(T).FullName}' must contain attribute {nameof(SheetIndexAttribute)}");
 
+            await _RunInTask(() => _SaveDataAsync(sheetIndexAttribute, datas, cancellationToken));
+        }
+        protected virtual void _SaveDataAsync<T>(SheetIndexAttribute sheetIndexAttribute, IEnumerable<T> datas, CancellationToken cancellationToken = default) where T : BaseData, new()
+        {
             using ExcelPackage package = new ExcelPackage(_filePath);
             ExcelWorksheet excelWorksheet = sheetIndexAttribute.GetSheet(package.Workbook.Worksheets);
 
             bool isChanged = false;
-            if (excelWorksheet is not null)
+
+            foreach (T data in datas)
             {
                 foreach (PropertyInfo propertyInfo in typeof(T).GetProperties())
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
                     ColAttribute? colAttribute = propertyInfo.GetCustomAttribute<ColAttribute>();
                     if (colAttribute is not null && colAttribute.Flag.HasFlag(ColFlag.IsUpdateBack))
                     {
@@ -71,11 +99,19 @@ namespace TqkLibrary.ExcelSupport
             }
 
             if (isChanged)
-                await package.SaveAsync();
+                package.Save();
         }
 
 
 
+        public virtual async Task<IReadOnlyList<T>> GetDatasAsync<T>(
+            bool isReadAll = false,
+            bool stopAtEmptyLine = false,
+            CancellationToken cancellationToken = default) where T : BaseData, new()
+        {
+            using var l = await _asyncLock.LockAsync(cancellationToken);
+            return await _RunInTask(() => _GetDatas<T>(isReadAll, stopAtEmptyLine));
+        }
         protected virtual IReadOnlyList<T> _GetDatas<T>(
             bool isReadAll = false,
             bool stopAtEmptyLine = false
@@ -93,7 +129,7 @@ namespace TqkLibrary.ExcelSupport
             {
                 for (int i = excelWorksheet.Rows.StartRow + 1; i < excelWorksheet.Rows.EndRow; i++)
                 {
-                    T? instance = ReadRow<T>(excelWorksheet, i, isReadAll, out bool isEmptyLine);
+                    T? instance = _ReadRow<T>(excelWorksheet, i, isReadAll, out bool isEmptyLine);
                     if (instance is not null)
                         values.Add(instance);
                     else if (stopAtEmptyLine && isEmptyLine)
@@ -102,7 +138,7 @@ namespace TqkLibrary.ExcelSupport
             }
             return values;
         }
-        protected virtual T? ReadRow<T>(ExcelWorksheet excelWorksheet, int lineIndex, bool isReadAll, out bool isEmptyLine) where T : BaseData, new()
+        protected virtual T? _ReadRow<T>(ExcelWorksheet excelWorksheet, int lineIndex, bool isReadAll, out bool isEmptyLine) where T : BaseData, new()
         {
             bool isSkip = false;
             isEmptyLine = true;
@@ -144,6 +180,9 @@ namespace TqkLibrary.ExcelSupport
 
             return instance;
         }
+
+
+
 
         public abstract class BaseData
         {

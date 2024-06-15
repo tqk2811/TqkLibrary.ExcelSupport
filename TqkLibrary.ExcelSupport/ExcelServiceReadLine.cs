@@ -26,6 +26,12 @@ namespace TqkLibrary.ExcelSupport
         public virtual async Task<T?> GetDataAsync<T>(CancellationToken cancellationToken = default) where T : BaseData, new()
         {
             using var l = await _asyncLock.LockAsync(cancellationToken);
+            return await _RunInTask(() => _GetDataAsync<T>(cancellationToken));
+        }
+
+
+        protected virtual T? _GetDataAsync<T>(CancellationToken cancellationToken = default) where T : BaseData, new()
+        {
             SheetIndexAttribute? sheetIndexAttribute = typeof(T).GetCustomAttribute<SheetIndexAttribute>();
             if (sheetIndexAttribute is null)
                 throw new InvalidOperationException($"'{typeof(T).FullName}' must contain attribute {nameof(SheetIndexAttribute)}");
@@ -40,7 +46,7 @@ namespace TqkLibrary.ExcelSupport
             {
                 _dict_startLineIndex[typeof(T)] = i + 1;
 
-                T? instance = ReadRow<T>(excelWorksheet, i, false, out bool isEmptyLine);
+                T? instance = _ReadRow<T>(excelWorksheet, i, false, out bool isEmptyLine);
                 if (instance is null)
                     continue;
                 return instance;

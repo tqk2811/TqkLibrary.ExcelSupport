@@ -19,14 +19,14 @@ namespace TqkLibrary.ExcelSupport
             _dict_Queues.Clear();
         }
 
-        protected virtual Queue<object> _EnsureQueue<T>() where T : BaseData, new()
+        protected virtual async Task<Queue<object>> _EnsureQueueAsync<T>() where T : BaseData, new()
         {
             Queue<object>? queue = null;
             if (!_dict_Queues.ContainsKey(typeof(T)))
             {
                 queue = new Queue<object>();
                 _dict_Queues[typeof(T)] = queue;
-                var datas = _GetDatas<T>(false, true);
+                var datas = await _RunInTask(() => _GetDatas<T>(false, true));
                 foreach (var data in datas)
                 {
                     queue.Enqueue(data);
@@ -44,7 +44,7 @@ namespace TqkLibrary.ExcelSupport
         {
             using var l = await _asyncLock.LockAsync(cancellationToken);
 
-            Queue<object> queue = _EnsureQueue<T>();
+            Queue<object> queue = await _EnsureQueueAsync<T>();
             if (queue.Count > 0)
             {
                 var data = queue.Dequeue();
@@ -59,7 +59,7 @@ namespace TqkLibrary.ExcelSupport
         {
             using var l = await _asyncLock.LockAsync(cancellationToken);
 
-            Queue<object> queue = _EnsureQueue<T>();
+            Queue<object> queue = await _EnsureQueueAsync<T>();
             queue.Enqueue(data);
         }
 
